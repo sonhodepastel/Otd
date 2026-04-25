@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Moto Control - Rotas Multi</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --card: #1a1a1a;
+            --primary: #0C9913; 
+            --warning: #FFCC00;
+            --danger: #E63946;
+            --text: #F5F5F5;
+            --text-dim: #888888;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: sans-serif; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            min-height: 100vh;
+        }
+
+        .container { width: 100%; max-width: 450px; }
+
+        header {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            position: sticky;
+            top: 0;
+            background: var(--bg);
+            padding: 10px 0;
+            z-index: 10;
+        }
+
+        .otd-badge {
+            background: var(--primary);
+            padding: 10px 15px;
+            border-radius: 12px;
+            font-weight: 800;
+            font-size: 1.2rem;
+        }
+
+        .entrega-card {
+            background: var(--card);
+            border-radius: 18px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border: 1px solid #333;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+
+        .timer-display {
+            font-size: 2.8rem;
+            font-weight: 900;
+            color: var(--warning);
+            text-align: center;
+            margin: 10px 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .input-group { margin-bottom: 12px; }
+        
+        label {
+            display: block;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+        }
+
+        input {
+            width: 100%;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            color: #fff;
+            padding: 12px;
+            outline: none;
+        }
+
+        input:focus { border-color: var(--primary); }
+
+        .btn {
+            width: 100%;
+            padding: 18px;
+            border: none;
+            border-radius: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .btn-start { background: var(--primary); color: white; }
+        .btn-stop { background: var(--danger); color: white; }
+        .btn-add { background: #222; color: var(--primary); margin-bottom: 20px; border: 1px solid var(--primary); }
+
+        footer {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            margin-top: 20px;
+            width: 100%;
+        }
+
+        .stat-box {
+            background: var(--card);
+            padding: 12px;
+            border-radius: 12px;
+            text-align: center;
+            border: 1px solid #222;
+        }
+
+        .stat-val { font-size: 1.2rem; font-weight: bold; display: block; }
+        .stat-lab { font-size: 0.6rem; color: var(--text-dim); text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <div style="font-weight: bold; color: var(--text-dim)">MOTO CONTROL PRO</div>
+        <div class="otd-badge"><span id="otd-perc">0</span>% <small style="font-size: 0.5rem">OTD</small></div>
+    </header>
+
+    <button class="btn btn-add" onclick="criarNovoCard()">+ Adicionar Pedido à Rota</button>
+
+    <div id="lista-entregas"></div>
+
+    <footer>
+        <div class="stat-box">
+            <span class="stat-val" id="count-total">0</span>
+            <span class="stat-lab">Total</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-val" id="avg-total" style="color: var(--warning);">0m</span>
+            <span class="stat-lab">Média</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-val" id="count-atraso" style="color: var(--danger);">0</span>
+            <span class="stat-lab">Atrasos</span>
+        </div>
+    </footer>
+    
+    <button onclick="limparBanco()" style="margin-top: 30px; background: none; border: none; color: #444; font-size: 0.7rem; width: 100%;">APAGAR TODO O HISTÓRICO</button>
+</div>
+
+<script>
+    let db;
+    let timersAtivos = {};
+
+    // Inicializar IndexedDB
+    const request = indexedDB.open("MotoControlRoteiroDB", 1);
+    request.onupgradeneeded = e => {
+        db = e.target.result;
+        db.createObjectStore("historico", { keyPath: "id", autoIncrement: true });
+    };
+    request.onsuccess = e => {
+        db = e.target.result;
+        carregarStats();
+    };
+
+    function criarNovoCard() {
+        const id = Date.now();
+        const lista = document.getElementById('lista-entregas');
+        
+        const card = document.createElement('div');
+        card.className = 'entrega-card';
+        card.id = `card-${id}`;
+        card.innerHTML = `
+            <div class="card-header">
+                <span>Pedido #${id.toString().slice(-4)}</span>
+                <span id="status-${id}" style="color: var(--warning)">Aguardando</span>
+            </div>
+            
+            <div class="input-group">
+                <label>Destino / Cliente</label>
+                <input type="text" id="end-${id}" placeholder="Ex: R. Paupina, 123">
+            </div>
+
+            <div class="input-group">
+                <label>Horário Previsto</label>
+                <input type="time" id="input-${id}">
+            </div>
+
+            <div class="timer-display" id="timer-${id}">00:00</div>
+            
+            <button class="btn btn-start" id="btn-${id}" onclick="gerenciarEntrega(${id})">Iniciar Percurso</button>
+        `;
+        lista.prepend(card);
+    }
+
+    function gerenciarEntrega(id) {
+        const btn = document.getElementById(`btn-${id}`);
+        const inputTime = document.getElementById(`input-${id}`);
+        const inputEnd = document.getElementById(`end-${id}`);
+        
+        if (!timersAtivos[id]) {
+            if (!inputTime.value) return alert("Defina o horário previsto!");
+            
+            timersAtivos[id] = {
+                inicioReal: Date.now(),
+                previsao: inputTime.value,
+                endereco: inputEnd.value || "Sem endereço",
+                interval: setInterval(() => atualizarRelogioCard(id, inputTime.value), 1000)
+            };
+            
+            btn.innerText = "Confirmar Entrega";
+            btn.className = "btn btn-stop";
+            document.getElementById(`status-${id}`).innerText = "Em percurso";
+            document.getElementById(`status-${id}`).style.color = "var(--primary)";
+            
+            inputTime.disabled = true;
+            inputEnd.disabled = true;
+        } else {
+            finalizarCard(id);
+        }
+    }
+
+    function atualizarRelogioCard(id, horaPrevista) {
+        const display = document.getElementById(`timer-${id}`);
+        const agora = Date.now();
+        const limite = new Date();
+        const [h, m] = horaPrevista.split(':');
+        limite.setHours(h, m, 0);
+
+        const diff = limite.getTime() - agora;
+
+        if (diff <= 0) {
+            display.innerText = "ATRASADO";
+            display.style.color = "var(--danger)";
+        } else {
+            const min = Math.floor(diff / 60000);
+            const seg = Math.floor((diff % 60000) / 1000);
+            display.innerText = `${min.toString().padStart(2,'0')}:${seg.toString().padStart(2,'0')}`;
+            display.style.color = "var(--warning)";
+        }
+    }
+
+    function finalizarCard(id) {
+        const dados = timersAtivos[id];
+        const agora = Date.now();
+        const [h, m] = dados.previsao.split(':');
+        const limite = new Date();
+        limite.setHours(h, m, 0);
+
+        const duracaoMin = Math.round((agora - dados.inicioReal) / 60000);
+        const atrasou = agora > limite.getTime() ? 1 : 0;
+
+        const transaction = db.transaction(["historico"], "readwrite");
+        transaction.objectStore("historico").add({
+            endereco: dados.endereco,
+            atrasou,
+            duracao: duracaoMin,
+            finalizadoEm: agora
+        });
+
+        transaction.oncomplete = () => {
+            clearInterval(dados.interval);
+            delete timersAtivos[id];
+            document.getElementById(`card-${id}`).remove();
+            carregarStats();
+        };
+    }
+
+    function carregarStats() {
+        const transaction = db.transaction(["historico"], "readonly");
+        const requestAll = transaction.objectStore("historico").getAll();
+
+        requestAll.onsuccess = () => {
+            const dados = requestAll.result;
+            if (dados.length === 0) return;
+
+            const total = dados.length;
+            const atrasos = dados.filter(d => d.atrasou === 1).length;
+            const somaTempos = dados.reduce((acc, d) => acc + d.duracao, 0);
+            
+            document.getElementById('count-total').innerText = total;
+            document.getElementById('count-atraso').innerText = atrasos;
+            document.getElementById('otd-perc').innerText = (((total - atrasos) / total) * 100).toFixed(1);
+            document.getElementById('avg-total').innerText = `${Math.round(somaTempos / total)}m`;
+        };
+    }
+
+    function limparBanco() {
+        if(confirm("Deseja apagar todas as estatísticas salvas?")) {
+            db.transaction(["historico"], "readwrite").objectStore("historico").clear().onsuccess = () => location.reload();
+        }
+    }
+</script>
+
+</body>
+</html>
